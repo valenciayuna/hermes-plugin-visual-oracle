@@ -88,8 +88,8 @@ Evaluation order, all deterministic:
 
 Accepted entries, mixed freely:
 
-- `[x, y, w, h]` — positive width and height required
-- `"#selector"` / `".class"` — must match at least one visible element (zero-size matches are
+- `[x, y, w, h]` with positive width and height required
+- `"#selector"` / `".class"`: must match at least one visible element (zero-size matches are
   dropped by `getBoundingClientRect`, so a hidden element is an error, not a mask)
 
 Behaviour:

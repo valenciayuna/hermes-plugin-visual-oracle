@@ -4,7 +4,7 @@
 
 A Hermes Agent plugin that turns the sentence *"the UI is fine"* from an opinion into a
 measurement. It captures a page once as a baseline, then compares later renders pixel by pixel and
-answers with numbers, boxes and images — and it will not let an agent close a turn while the page
+answers with numbers, boxes and images, and it will not let an agent close a turn while the page
 is showing something the agent has not looked at.
 
 ```python
@@ -23,7 +23,7 @@ agent reports success. Meanwhile the payment button is hidden behind a panel, th
 title, or a sprite has been cut in half.
 
 These are not exceptions. They are not caught by unit tests. And the one thing that cannot catch
-them is the model's own opinion of its own work — which is exactly what "looks fine" is.
+them is the model's own opinion of its own work, which is exactly what "looks fine" is.
 
 The usual fix is a human staring at a screenshot afterwards. visual-oracle moves that stare into the
 loop, as a check the agent has to pass before it can say it is done.
@@ -62,13 +62,13 @@ Every `visual_check` returns a verdict and the evidence behind it:
 
 ## How it works
 
-### 1. Capture — a real browser session, no driver
+### 1. Capture, a real browser session, no driver
 
 Chrome is launched with `--remote-debugging-port=0`; the port and WebSocket path are read from
 `DevToolsActivePort` in a throwaway profile, and `ws.py` (a ~120-line WebSocket client, standard
 library only) speaks the DevTools protocol to it.
 
-That is what makes the waiting possible — and the waiting is what stops false positives:
+That is what makes the waiting possible, and the waiting is what stops false positives:
 
 | cause of a false positive | what the capture does about it |
 |---|---|
@@ -81,7 +81,7 @@ That is what makes the waiting possible — and the waiting is what stops false 
 Each capture records what produced it: URL, viewport, Chrome version, protocol version, timestamp,
 font status, number of frames needed, mask report, broken images, byte size.
 
-### 2. Diff — decoded and compared in-process
+### 2. Diff, decoded and compared in-process
 
 `pngdiff.py` reads the PNG chunk stream, inflates the pixels and undoes the per-scanline filters
 (None / Sub / Up / Average / Paeth), then compares channels with a tolerance. No Pillow, no
@@ -90,7 +90,7 @@ ImageMagick, no service.
 Changed pixels are grouped on an 8×8 block grid and merged into connected regions, so a page with
 three separate changes reports three boxes.
 
-### 3. Verdict — three states, never a shrug
+### 3. Verdict, three states, never a shrug
 
 ```
 PASS    within policy: under the threshold, or exactly the change the contract declared
@@ -101,7 +101,7 @@ REVIEW  the policy cannot be evaluated reliably, or the change needs a human dec
 `REVIEW` matters: a visual difference is evidence of a change, not proof of a defect. When the
 plugin cannot decide honestly, it says so instead of picking the convenient answer.
 
-### 4. Gate — the turn does not close on a failing check
+### 4. Gate, the turn does not close on a failing check
 
 `pre_verify` fires once per turn, before the agent finishes. On `FAIL` or `REVIEW` it returns:
 
@@ -188,8 +188,8 @@ the hook refusing to close a turn.
 
 ## Demo
 
-`demo/` contains the fixture used in the recording — `baseline.html`, `broken.html`, `fixed.html`;
-the bug is one panel landing on top of the pay button — plus `demo.mp4` (30s, English narration).
+`demo/` contains the fixture used in the recording: `baseline.html`, `broken.html`, `fixed.html`;
+the bug is one panel landing on top of the pay button, plus `demo.mp4` (30s, English narration).
 
 Real numbers from that run: the broken state is **22.774% changed** with two regions, and the fixed
 state is **0.0%**.
