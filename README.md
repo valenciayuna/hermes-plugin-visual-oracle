@@ -16,8 +16,6 @@ visual_check(name="checkout", url="http://localhost:3000/checkout")
 #   diff: …/checkout/last/diff.png
 ```
 
----
-
 ## Why this exists
 
 An agent edits CSS, the page still renders, nothing throws, and every test still passes. So the
@@ -32,8 +30,6 @@ loop, as a check the agent has to pass before it can say it is done.
 
 **What it is not:** it does not judge design, it does not know what "beautiful" means, and it never
 claims a page is correct. It reports what changed, where, and whether that change was declared.
-
----
 
 ## What a check gives you
 
@@ -63,8 +59,6 @@ Every `visual_check` returns a verdict and the evidence behind it:
 - `diff.png` is the page in grey with changed pixels in red
 - `overlay.png` is the baseline blended over the current render
 - `report.json` on disk holds the same payload for anything that wants to read it later
-
----
 
 ## How it works
 
@@ -119,8 +113,6 @@ plugin cannot decide honestly, it says so instead of picking the convenient answ
 The agent gets the numbers and the image paths. Hermes bounds this with `agent.max_verify_nudges`,
 so it can never become an unbounded loop.
 
----
-
 ## Visual change contracts
 
 Declaring intent before touching the page is what separates "changed as planned" from "changed
@@ -151,8 +143,6 @@ Deterministic rules:
 `#price` is the right move. It knows the pixels inside `#cta` moved and nothing else did. The
 judgement beyond that stays with a human, on purpose.
 
----
-
 ## Masks
 
 ```python
@@ -169,8 +159,6 @@ Selector masks are resolved **before** the capture: the element keeps its space 
 - every ignored rectangle is listed in the capture metadata, so a human can audit exactly what was
   excluded
 
----
-
 ## Tools
 
 | tool | what it does |
@@ -179,8 +167,6 @@ Selector masks are resolved **before** the capture: the element keeps its space 
 | `visual_check` | render now, diff, apply contract and masks, return PASS / FAIL / REVIEW with artefacts |
 | `visual_list` | every baseline in this session with its last verdict and region count |
 | `pre_verify` (hook) | keeps the turn open while the last verdict is FAIL or REVIEW |
-
----
 
 ## Tests
 
@@ -200,8 +186,6 @@ declared move that passes a contract, a protected region that fails it, a missin
 (REVIEW), selector masks, the mask coverage limit, required-image failures, artefacts on disk, and
 the hook refusing to close a turn.
 
----
-
 ## Demo
 
 `demo/` contains the fixture used in the recording — `baseline.html`, `broken.html`, `fixed.html`;
@@ -209,8 +193,6 @@ the bug is one panel landing on top of the pay button — plus `demo.mp4` (30s, 
 
 Real numbers from that run: the broken state is **22.774% changed** with two regions, and the fixed
 state is **0.0%**.
-
----
 
 ## Requirements and limits
 
@@ -224,8 +206,6 @@ state is **0.0%**.
 - the diff is geometry: a wrong colour inside an unchanged shape may not register
 
 Full parameter reference: `docs/configuration.md`. Example artefacts: `docs/examples/`.
-
----
 
 ## Layout
 
