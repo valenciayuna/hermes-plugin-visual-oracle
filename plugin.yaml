@@ -1,0 +1,15 @@
+name: visual-oracle
+version: 0.1.0
+description: >-
+  An agent cannot report that a UI is fine without a screenshot to prove it. Captures a baseline
+  render, then pixel-diffs later renders against it and reports the percentage changed plus the
+  bounding box of what moved, with regions you can mask. A failing check keeps the turn open.
+  Refuses to guess: unsupported images and missing browsers are errors, not passes.
+author: valen
+provides_tools:
+  - visual_base
+  - visual_check
+  - visual_list
+provides_hooks:
+  - pre_verify
+requires_env: []
