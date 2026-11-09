@@ -171,9 +171,13 @@ Selector masks are resolved **before** the capture: the element keeps its space 
 ## Tests
 
 ```
-python3 tests/pngdiff_proof.py     18/18 checks passed   no browser, generated fixtures
-python3 tests/visual_proof.py      16/16 checks passed   real Chrome, real pages
-hermes plugins validate .          Validation passed
+python3 tests/pngdiff_proof.py       18/18   decoder and diff, generated fixtures
+python3 tests/audit_code.py          11/11   shipped diff vs a naive reference
+python3 tests/visual_proof.py        16/16   end to end through Chrome
+python3 tests/audit_contract.py      12/12   contract and mask matrix
+python3 tests/audit_resilience.py     5/5    hook under broken stores
+python3 tests/audit_integration.py    9/9    Hermes dispatcher, call site, nudge budget
+hermes plugins validate .            passed
 ```
 
 `pngdiff_proof.py` generates PNGs using every filter type and both colour models, then asserts:
@@ -206,6 +210,7 @@ state is **0.0%**.
 - the diff is geometry: a wrong colour inside an unchanged shape may not register
 
 Full parameter reference: `docs/configuration.md`. Example artefacts: `docs/examples/`.
+Audit results, including four bugs found and fixed: `docs/audit.md`.
 
 ## Layout
 

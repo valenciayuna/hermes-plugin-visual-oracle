@@ -60,6 +60,23 @@ def resolve_masks(browser: Browser, masks: list | None, width: int, height: int)
     return rects, report
 
 
+def split_masks(masks: list | None) -> tuple[list[list[int]], list[str]]:
+    """Separate coordinate masks from selector masks, validating both."""
+    coords: list[list[int]] = []
+    selectors: list[str] = []
+    for item in masks or []:
+        if isinstance(item, str):
+            selectors.append(item)
+        elif isinstance(item, (list, tuple)) and len(item) == 4:
+            rect = [int(v) for v in item]
+            if rect[2] <= 0 or rect[3] <= 0:
+                raise CdpError(f"mask rectangle must have positive size: {rect}")
+            coords.append(rect)
+        else:
+            raise CdpError(f"mask entry must be [x, y, w, h] or a CSS selector, got {item!r}")
+    return coords, selectors
+
+
 def capture(url: str, out: Path, width: int = 1280, height: int = 720, wait_ms: int = 250,
             wait_selector: str = "", stable: bool = True, masks: list | None = None,
             require_images: bool = False, attempts: int = 4) -> dict:

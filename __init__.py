@@ -32,7 +32,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import pngdiff  # noqa: E402
-from capture import capture, resolve_masks  # noqa: E402
+from capture import capture, split_masks  # noqa: E402
 from cdp import Browser, CdpError  # noqa: E402
 
 DEFAULT_THRESHOLD = 0.2
@@ -52,8 +52,8 @@ def data_dir() -> Path:
     return path
 
 
-def _session_dir() -> Path:
-    session = os.environ.get("HERMES_SESSION_ID") or "local"
+def _session_dir(session_id: str = "") -> Path:
+    session = session_id or os.environ.get("HERMES_SESSION_ID") or "local"
     safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in session)[:60]
     path = data_dir() / safe
     path.mkdir(parents=True, exist_ok=True)
@@ -192,8 +192,13 @@ def visual_check(name: str, url: str = "", image: str = "", threshold: float = D
             src = Path(os.path.expanduser(image))
             if not src.is_file():
                 raise CdpError(f"image not found: {src}")
+            coords, selectors = split_masks(mask)
+            if selectors:
+                raise CdpError(
+                    "selector masks need a live page: with image= there is no DOM, so "
+                    f"{selectors} cannot be resolved. Pass [x, y, w, h] rectangles instead.")
             current.write_bytes(src.read_bytes())
-            capture_info = {"source": "image", "from": str(src)}
+            capture_info = {"source": "image", "from": str(src), "mask_rects": coords}
             probe_rects: dict[str, list] = {}
         else:
             if not url:
@@ -253,6 +258,45 @@ def _decide(changed_pct: float, threshold: float, regions: list[dict], policy: d
     """Deterministic verdict. No model, no taste: counts, boxes and the declared contract."""
     reasons: list[str] = []
     expected_declared = bool(policy.get("expected_changes")) if policy else False
+
+    expected_boxes: list[list[int]] = []
+    move_boxes: list[list[int]] = []
+    protected_boxes: list[list[int]] = []
+
+    if policy:
+        for item in policy.get("expected_changes", []) or []:
+            target = item.get("target") if isinstance(item, dict) else item
+            change = str(item.get("change", "")).lower() if isinstance(item, dict) else ""
+            if isinstance(target, str):
+                rects = probe_rects.get(target) or []
+                if not rects:
+                    return "REVIEW", [f"contract target not found on the page: {target}"]
+                expected_boxes.extend(rects)
+                if change == "move":
+                    move_boxes.extend(rects)
+            elif isinstance(target, list) and len(target) == 4:
+                box = [int(v) for v in target]
+                expected_boxes.append(box)
+                if change == "move":
+                    move_boxes.append(box)
+
+        for item in policy.get("protected_regions", []) or []:
+            if isinstance(item, str):
+                rects = probe_rects.get(item) or []
+                if not rects:
+                    return "REVIEW", [f"protected region not found on the page: {item}"]
+                protected_boxes.extend(rects)
+            elif isinstance(item, list) and len(item) == 4:
+                protected_boxes.append([int(v) for v in item])
+
+    # a protected region is a promise that nothing inside it moves, so it is checked before the
+    # threshold: a 12px element changing inside a protected header still breaks the promise
+    for region in regions:
+        box = region["bbox"]
+        if any(_overlaps(box, p) for p in protected_boxes):
+            return "FAIL", [f"protected region changed at {box} "
+                            f"({region['changed_pixels']} px, {changed_pct}% of the page)"]
+
     if changed_pct <= threshold and not expected_declared:
         return "PASS", [f"{changed_pct}% changed, within the {threshold}% threshold"]
 
@@ -262,40 +306,10 @@ def _decide(changed_pct: float, threshold: float, regions: list[dict], policy: d
         return verdict, [f"{changed_pct}% changed, over the {threshold}% threshold"
                          + (f", largest region at {box}" if box else "")]
 
-    expected_boxes: list[list[int]] = []
-    move_boxes: list[list[int]] = []
-    for item in policy.get("expected_changes", []) or []:
-        target = item.get("target") if isinstance(item, dict) else item
-        change = str(item.get("change", "")).lower() if isinstance(item, dict) else ""
-        if isinstance(target, str):
-            rects = probe_rects.get(target) or []
-            if not rects:
-                return "REVIEW", [f"contract target not found on the page: {target}"]
-            expected_boxes.extend(rects)
-            if change == "move":
-                move_boxes.extend(rects)
-        elif isinstance(target, list) and len(target) == 4:
-            box = [int(v) for v in target]
-            expected_boxes.append(box)
-            if change == "move":
-                move_boxes.append(box)
-
-    protected_boxes: list[list[int]] = []
-    for item in policy.get("protected_regions", []) or []:
-        if isinstance(item, str):
-            rects = probe_rects.get(item) or []
-            if not rects:
-                return "REVIEW", [f"protected region not found on the page: {item}"]
-            protected_boxes.extend(rects)
-        elif isinstance(item, list) and len(item) == 4:
-            protected_boxes.append([int(v) for v in item])
-
     unexpected: list[list[int]] = []
     expected_hits = 0
     for region in regions:
         box = region["bbox"]
-        if any(_overlaps(box, p) for p in protected_boxes):
-            return "FAIL", [f"protected region changed at {box}"]
         if any(_inside(box, e) or _overlaps(box, e) for e in expected_boxes):
             expected_hits += 1
         elif any(_same_footprint(box, m) for m in move_boxes):
@@ -336,25 +350,51 @@ def visual_list() -> dict:
 # --------------------------------------------------------------------------- hook
 
 
-def on_pre_verify(**_):
-    """A FAIL or REVIEW keeps the turn open; the agent gets the numbers and the image paths."""
-    for case in sorted(p for p in _session_dir().iterdir() if p.is_dir()):
+def on_pre_verify(session_id: str = "", **_):
+    """A FAIL or REVIEW keeps the turn open; the agent gets the numbers and the image paths.
+
+    Hermes passes the live session id here, so a failure in one chat cannot nag another. If that
+    directory holds nothing yet (tools wrote before the hook ever ran) the shared store is used.
+    A broken store must never raise inside the turn loop: this is a guardrail, not a gatekeeper.
+    """
+    try:
+        return _pre_verify_message(session_id)
+    except Exception:
+        return None
+
+
+def _pre_verify_message(session_id: str) -> dict | None:
+    roots = [_session_dir(session_id)]
+    shared = _session_dir()
+    if shared not in roots:
+        roots.append(shared)
+
+    cases = []
+    for root in roots:
+        if root.is_dir():
+            cases.extend(sorted(p for p in root.iterdir() if p.is_dir()))
+    for case in cases:
         last = (_read_meta(case) or {}).get("last") or {}
-        if last.get("status") in ("FAIL", "REVIEW"):
-            regions = last.get("regions") or []
-            where = ", ".join(str(r["bbox"]) for r in regions[:3])
-            artifacts = last.get("artifacts") or {}
-            return {
-                "action": "continue",
-                "message": (
-                    f"[visual-oracle] {last['status']} on '{last['name']}': "
-                    f"{last['changed_pct']}% changed (allowed {last['threshold_pct']}%)\n"
-                    + (f"regions: {where}\n" if where else "")
-                    + (f"diff: {artifacts.get('diff')}\n" if artifacts.get("diff") else "")
-                    + f"baseline: {last['baseline']}\ncurrent : {last['current']}\n"
-                    "Look at the diff. Fix the layout, or state plainly what changed and why."
-                ),
-            }
+        if last.get("status") not in ("FAIL", "REVIEW"):
+            continue
+        regions = last.get("regions") or []
+        where = ", ".join(str(r.get("bbox")) for r in regions[:3] if isinstance(r, dict))
+        artifacts = last.get("artifacts") or {}
+        name = last.get("name") or case.name
+        pct = last.get("changed_pct")
+        allowed = last.get("threshold_pct")
+        lines = [f"[visual-oracle] {last.get('status')} on '{name}': "
+                 + (f"{pct}% changed" if pct is not None else "changed")
+                 + (f" (allowed {allowed}%)" if allowed is not None else "")]
+        if where:
+            lines.append(f"regions: {where}")
+        if artifacts.get("diff"):
+            lines.append(f"diff: {artifacts['diff']}")
+        for key in ("baseline", "current"):
+            if last.get(key):
+                lines.append(f"{key}: {last[key]}")
+        lines.append("Look at the diff. Fix the layout, or state plainly what changed and why.")
+        return {"action": "continue", "message": "\n".join(lines)}
     return None
 
 
