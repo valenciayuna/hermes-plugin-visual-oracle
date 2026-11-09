@@ -12,7 +12,7 @@ visual_base(name="checkout", url="http://localhost:3000/checkout")
 visual_check(name="checkout", url="http://localhost:3000/checkout")
 # FAIL  checkout: 22.774% changed (allowed 0.2%)
 #   region [653, 241, 347, 236] 80192px density 0.979
-#   region [0, 227, 341, 186]   61004px density 0.965
+#   region [0, 227, 341, 186]   61004px density 0.962
 #   diff: …/checkout/last/diff.png
 ```
 
