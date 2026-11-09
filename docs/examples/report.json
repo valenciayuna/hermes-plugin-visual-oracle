@@ -1,0 +1,93 @@
+{
+ "ok": true,
+ "name": "checkout",
+ "status": "PASS",
+ "changed_pct": 2.607,
+ "threshold_pct": 0.2,
+ "changed_pixels": 14080,
+ "total_pixels": 540000,
+ "regions": [
+  {
+   "bbox": [
+    20,
+    120,
+    160,
+    44
+   ],
+   "changed_pixels": 7040,
+   "area": 7040,
+   "density": 1.0
+  },
+  {
+   "bbox": [
+    20,
+    300,
+    160,
+    44
+   ],
+   "changed_pixels": 7040,
+   "area": 7040,
+   "density": 1.0
+  }
+ ],
+ "bbox": [
+  20,
+  120,
+  160,
+  44
+ ],
+ "reasons": [
+  "2 expected change(s) confirmed inside the declared targets"
+ ],
+ "contract": {
+  "expected_changes": [
+   {
+    "target": "#cta",
+    "change": "move",
+    "description": "move the pay button below the price"
+   }
+  ],
+  "protected_regions": [
+   "#nav",
+   "#price"
+  ],
+  "max_changed_pct": 3.0
+ },
+ "source": {
+  "url": "data:text/html,<style>body{margin:0;background:%23fff;font:20px sans-serif}%23nav{position:absolute;left:0;top:0;width:800px;height:60px;background:%23eef2f0}%23title{position:absolute;left:20px;top:90px}%23cta{position:absolute;left:20px;top:300;width:160px;height:44px;background:%232f7d4f}%23price{position:absolute;left:20px;top:180px}</style><div id='nav'></div><div id='title'>Checkout</div><div id='price'>Rp 120.000</div><button id='cta'>PAY</button>",
+  "viewport": [
+   900,
+   600
+  ],
+  "chrome": "Chrome/152.0.7977.64",
+  "protocol": "1.3",
+  "captured_at": "2026-11-09T13:56:31Z",
+  "elapsed_s": 1.06,
+  "wait_ms": 250,
+  "wait_selector": "",
+  "fonts": "loaded",
+  "stable": true,
+  "stable_tries": 2,
+  "bytes": 7006,
+  "masks": {
+   "coordinate": [],
+   "selector": [],
+   "hidden": [],
+   "coverage_pct": 0.0
+  },
+  "mask_rects": [],
+  "broken_images": [],
+  "source": "chrome"
+ },
+ "artifacts": {
+  "diff": "/tmp/vo-example-s6nuxi4u/plugin-data/visual-oracle/example/checkout/last/diff.png",
+  "overlay": "/tmp/vo-example-s6nuxi4u/plugin-data/visual-oracle/example/checkout/last/overlay.png",
+  "regions": [
+   "/tmp/vo-example-s6nuxi4u/plugin-data/visual-oracle/example/checkout/last/region-0.png",
+   "/tmp/vo-example-s6nuxi4u/plugin-data/visual-oracle/example/checkout/last/region-1.png"
+  ]
+ },
+ "baseline": "/tmp/vo-example-s6nuxi4u/plugin-data/visual-oracle/example/checkout/baseline.png",
+ "current": "/tmp/vo-example-s6nuxi4u/plugin-data/visual-oracle/example/checkout/current.png",
+ "checked_at": "2026-11-09T13:56:34Z"
+}

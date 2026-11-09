@@ -1,64 +1,112 @@
-"""Screenshot capture through a local Chrome. No driver, no API, no network beyond the page."""
+"""Capture through Chrome's DevTools session, with the waiting made explicit.
+
+Three things cause false positives in screenshot testing, and all three are handled here rather
+than papered over:
+
+1. webfonts swapping in after the first paint  -> wait for `document.fonts.ready`
+2. elements that animate into place            -> optional wait for a selector, then stability check
+3. images that never load                      -> report them (and fail loudly if asked to)
+
+Selector masks are applied *before* the capture where possible: the element keeps its space but is
+made invisible, so a clock or a carousel cannot add noise to the diff.
+"""
 
 from __future__ import annotations
 
-import os
-import shutil
-import subprocess
-import tempfile
+import json
 import time
 from pathlib import Path
 
-CHROME_CANDIDATES = (
-    "google-chrome", "google-chrome-stable", "chromium", "chromium-browser",
-    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-)
+from cdp import Browser, CdpError
+
+COVERAGE_LIMIT = 0.5   # refusing to mask more than half the viewport: that is not a mask, that is a blindfold
 
 
-def find_chrome() -> str | None:
-    for name in CHROME_CANDIDATES:
-        found = shutil.which(name) or (name if Path(name).exists() else None)
-        if found:
-            return found
-    return None
+def _mask_css(selectors: list[str]) -> str:
+    rules = ",\n".join(selectors)
+    return f"{rules} {{ visibility: hidden !important; }}"
 
 
-def capture(url: str, out: Path, width: int = 1280, height: int = 720,
-            wait_ms: int = 1500, timeout: int = 60) -> Path:
-    """Render `url` headlessly and write a PNG. Raises RuntimeError with the reason on failure."""
-    chrome = find_chrome()
-    if not chrome:
-        raise RuntimeError("no chrome/chromium found; pass image=... instead of url=...")
+def resolve_masks(browser: Browser, masks: list | None, width: int, height: int) -> tuple[list[list[int]], dict]:
+    """Turn a mix of [x, y, w, h] and CSS selectors into rectangles, and report what was ignored."""
+    rects: list[list[int]] = []
+    report: dict = {"coordinate": [], "selector": [], "hidden": [], "coverage_pct": 0.0}
 
+    for item in masks or []:
+        if isinstance(item, str):
+            matched = browser.rects(item)
+            if not matched:
+                raise CdpError(f"mask selector matched no visible element: {item!r} "
+                               "(a mask that silently matches nothing is how a check lies)")
+            rects.extend(matched)
+            report["selector"].append({"selector": item, "rects": matched})
+            report["hidden"].append(item)
+        elif isinstance(item, (list, tuple)) and len(item) == 4:
+            rect = [int(v) for v in item]
+            if rect[2] <= 0 or rect[3] <= 0:
+                raise CdpError(f"mask rectangle must have positive size: {rect}")
+            rects.append(rect)
+            report["coordinate"].append(rect)
+        else:
+            raise CdpError(f"mask entry must be [x, y, w, h] or a CSS selector, got {item!r}")
+
+    covered = sum(w * h for _x, _y, w, h in rects)
+    total = width * height
+    report["coverage_pct"] = round(covered / total * 100.0, 2) if total else 0.0
+    if total and covered / total > COVERAGE_LIMIT:
+        raise CdpError(
+            f"masks cover {report['coverage_pct']}% of the viewport, over the "
+            f"{int(COVERAGE_LIMIT * 100)}% limit; a check that ignores half the screen cannot fail")
+    return rects, report
+
+
+def capture(url: str, out: Path, width: int = 1280, height: int = 720, wait_ms: int = 250,
+            wait_selector: str = "", stable: bool = True, masks: list | None = None,
+            require_images: bool = False, attempts: int = 4) -> dict:
+    """Render `url` and write a PNG. Returns capture metadata; raises CdpError on any doubt."""
+    out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    if out.exists():
-        out.unlink()
+    started = time.time()
 
-    with tempfile.TemporaryDirectory() as profile:
-        argv = [
-            chrome,
-            "--headless=new",
-            "--no-sandbox",
-            "--disable-gpu",
-            "--disable-dev-shm-usage",
-            "--hide-scrollbars",
-            "--force-device-scale-factor=1",
-            f"--user-data-dir={profile}",
-            f"--window-size={width},{height}",
-            f"--virtual-time-budget={max(wait_ms, 200)}",
-            f"--screenshot={out}",
-            url,
-        ]
-        env = dict(os.environ)
-        env.pop("DISPLAY", None)
-        started = time.time()
-        try:
-            proc = subprocess.run(argv, capture_output=True, text=True, timeout=timeout, env=env)
-        except subprocess.TimeoutExpired:
-            raise RuntimeError(f"chrome timed out after {timeout}s rendering {url}") from None
-        elapsed = round(time.time() - started, 2)
+    with Browser(width=width, height=height) as browser:
+        browser.navigate(url, wait_ms=wait_ms)
+        fonts = browser.wait_fonts()
 
-    if not out.exists() or out.stat().st_size == 0:
-        tail = (proc.stderr or proc.stdout or "").strip().splitlines()[-3:]
-        raise RuntimeError(f"chrome produced no screenshot ({elapsed}s): {' / '.join(tail)}")
-    return out
+        if wait_selector:
+            browser.wait_selector(wait_selector)
+
+        rects, mask_report = resolve_masks(browser, masks, width, height)
+        if mask_report["hidden"]:
+            browser.evaluate(
+                "(function(css){const s=document.createElement('style');s.textContent=css;"
+                "document.head.appendChild(s);return true;})(" + json.dumps(_mask_css(mask_report["hidden"])) + ")")
+            time.sleep(0.1)   # let the style land before the frame is taken
+
+        broken = browser.broken_images()
+        if broken and require_images:
+            raise CdpError(f"{len(broken)} image(s) failed to load: {', '.join(broken[:5])}")
+
+        if stable:
+            png, tries = browser.screenshot_stable(attempts=attempts)
+        else:
+            png, tries = browser.screenshot(), 1
+        out.write_bytes(png)
+
+        info = {
+            "url": url,
+            "viewport": [width, height],
+            "chrome": browser.info.get("chrome", ""),
+            "protocol": browser.info.get("protocol", ""),
+            "captured_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(started)),
+            "elapsed_s": round(time.time() - started, 2),
+            "wait_ms": wait_ms,
+            "wait_selector": wait_selector,
+            "fonts": fonts,
+            "stable": stable,
+            "stable_tries": tries,
+            "bytes": len(png),
+            "masks": mask_report,
+            "mask_rects": rects,
+            "broken_images": broken,
+        }
+    return info
