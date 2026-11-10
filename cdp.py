@@ -17,11 +17,13 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import os
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 
+from urlpolicy import UrlPolicyError, check_url
 from ws import WebSocket, WsError
 
 CHROME_CANDIDATES = (
@@ -43,14 +45,36 @@ def find_chrome() -> str | None:
     return None
 
 
+def sandbox_usable() -> bool:
+    """Chrome's sandbox needs user namespaces. As root, or without them, it refuses to start."""
+    if os.environ.get("VO_NO_SANDBOX") == "1":
+        return False
+    try:
+        if os.geteuid() == 0:
+            return False
+    except AttributeError:
+        pass
+    try:
+        with open("/proc/sys/user/max_user_namespaces", "r", encoding="utf-8") as handle:
+            if int(handle.read().strip() or "0") == 0:
+                return False
+    except (OSError, ValueError):
+        pass
+    return True
+
+
 class Browser:
     """One Chrome process, one page target, flattened DevTools sessions."""
 
-    def __init__(self, width: int = 1280, height: int = 720, timeout: float = 30.0):
+    def __init__(self, width: int = 1280, height: int = 720, timeout: float = 30.0,
+                 allow_hosts: list[str] | tuple[str, ...] | None = None):
         chrome = find_chrome()
         if not chrome:
             raise CdpError("no chrome/chromium found; pass image=... instead of url=...")
         self.timeout = timeout
+        self.allow_hosts = tuple(allow_hosts or ("localhost", "127.0.0.1", "::1"))
+        self.blocked: list[str] = []
+        self.on_event = None
         self._next_id = 0
         self._session: str | None = None
         self.info: dict = {}
@@ -58,7 +82,8 @@ class Browser:
         self.profile = Path(tempfile.mkdtemp(prefix="vo-chrome-"))
         self.proc = subprocess.Popen(
             [
-                chrome, "--headless=new", "--no-sandbox", "--disable-gpu",
+                chrome, "--headless=new", *(["--no-sandbox"] if not sandbox_usable() else []),
+                "--disable-gpu",
                 "--disable-dev-shm-usage", "--hide-scrollbars", "--force-device-scale-factor=1",
                 "--no-first-run", "--no-default-browser-check",
                 f"--user-data-dir={self.profile}",
@@ -105,6 +130,14 @@ class Browser:
 
     # ------------------------------------------------------------------ transport
 
+    def notify(self, method: str, params: dict | None = None, session: bool = True) -> None:
+        """Fire a command and do not wait. Safe from inside an event handler."""
+        self._next_id += 1
+        message = {"id": self._next_id, "method": method, "params": params or {}}
+        if session and self._session:
+            message["sessionId"] = self._session
+        self.ws.send(message)
+
     def call(self, method: str, params: dict | None = None, session: bool = True) -> dict:
         self._next_id += 1
         message = {"id": self._next_id, "method": method, "params": params or {}}
@@ -119,7 +152,13 @@ class Browser:
             except WsError as exc:
                 raise CdpError(str(exc)) from None
             if reply.get("id") != self._next_id:
-                continue  # an event, or a reply to an earlier call
+                # an event, or a reply to an earlier call
+                if self.on_event is not None and reply.get("method"):
+                    try:
+                        self.on_event(reply["method"], reply.get("params") or {})
+                    except Exception:  # a handler must never break the call loop
+                        pass
+                continue
             if "error" in reply:
                 err = reply["error"]
                 raise CdpError(f"{method}: {err.get('message')} ({err.get('code')})")
@@ -146,7 +185,37 @@ class Browser:
             raise CdpError(f"JS error: {detail or out['exceptionDetails'].get('text')}")
         return (out.get("result") or {}).get("value")
 
+    def guard_urls(self) -> None:
+        """Refuse non public targets on every request, redirects included."""
+        self.call("Fetch.enable", {"patterns": [{"urlPattern": "*", "requestStage": "Request"}]})
+
+        def handler(method: str, params: dict) -> None:
+            if method != "Fetch.requestPaused":
+                return
+            request_id = params.get("requestId")
+            url = (params.get("request") or {}).get("url", "")
+            try:
+                check_url(url, self.allow_hosts)
+                self.notify("Fetch.continueRequest", {"requestId": request_id})
+            except UrlPolicyError as exc:
+                self.blocked.append(f"{url[:120]}: {exc}")
+                self.notify("Fetch.failRequest", {"requestId": request_id,
+                                                  "errorReason": "BlockedByClient"})
+
+        self.on_event = handler
+
+    def assert_landed(self, url: str) -> None:
+        try:
+            final = self.evaluate("location.href")
+        except CdpError:
+            return
+        if not isinstance(final, str) or final.startswith(("about:", "chrome-error:")):
+            # a blocked request lands on the error page; capture() reports the real reason
+            return
+        check_url(final, self.allow_hosts)
+
     def navigate(self, url: str, wait_ms: int = 0) -> None:
+        check_url(url, self.allow_hosts)
         self.call("Page.navigate", {"url": url})
         deadline = time.time() + self.timeout
         while time.time() < deadline:
@@ -155,6 +224,7 @@ class Browser:
             time.sleep(0.05)
         else:
             raise CdpError(f"page never finished loading: {url}")
+        self.assert_landed(url)
         if wait_ms:
             time.sleep(wait_ms / 1000.0)
 

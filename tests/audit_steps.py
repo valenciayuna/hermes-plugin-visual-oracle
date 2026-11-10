@@ -13,6 +13,8 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from localserve import PAGES
+
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -43,7 +45,7 @@ def page(menu_css: str) -> str:
             "<button id='cta'>PAY</button>"
             "<script>document.getElementById('menu-btn').onclick=()=>"
             "document.getElementById('menu').classList.add('open');</script>")
-    return ("data:text/html,<style>" + css + "</style>" + body).replace("#", "%23")
+    return PAGES.add("<style>" + css + "</style>" + body)
 
 
 # correct: the open menu sits in the top right corner, clear of the pay button

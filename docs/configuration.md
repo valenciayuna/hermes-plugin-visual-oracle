@@ -134,3 +134,14 @@ Written with every baseline and echoed by `visual_base`:
 | `steps` wait that times out | error naming the selector |
 
 Nothing in this list degrades into a pass.
+
+## Render policy
+
+| setting | default | meaning |
+| --- | --- | --- |
+| `VO_ALLOW_HOSTS` | empty | extra host names that may be rendered even though they are not public, comma separated |
+| `VO_NO_SANDBOX` | unset | set to `1` to launch Chrome with `--no-sandbox`; otherwise the sandbox is used unless Chrome cannot start it (root, or no user namespaces) |
+
+`http` and `https` only. `localhost`, `127.0.0.1` and `::1` are allowed by default. A request to any
+other non public address is failed inside the browser, including redirect hops, and the capture
+reports the URL it refused.

@@ -113,13 +113,15 @@ def apply_steps(browser: Browser, steps: list | None, settle_ms: int = 120) -> l
 
 def capture(url: str, out: Path, width: int = 1280, height: int = 720, wait_ms: int = 250,
             wait_selector: str = "", stable: bool = True, masks: list | None = None,
-            require_images: bool = False, attempts: int = 4, steps: list | None = None) -> dict:
+            require_images: bool = False, attempts: int = 4, steps: list | None = None,
+            allow_hosts: list[str] | tuple[str, ...] | None = None) -> dict:
     """Render `url` and write a PNG. Returns capture metadata; raises CdpError on any doubt."""
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     started = time.time()
 
-    with Browser(width=width, height=height) as browser:
+    with Browser(width=width, height=height, allow_hosts=allow_hosts) as browser:
+        browser.guard_urls()
         browser.navigate(url, wait_ms=wait_ms)
         fonts = browser.wait_fonts()
 
@@ -127,6 +129,8 @@ def capture(url: str, out: Path, width: int = 1280, height: int = 720, wait_ms: 
             browser.wait_selector(wait_selector)
 
         applied = apply_steps(browser, steps)
+        if browser.blocked:
+            raise CdpError("refused to render: " + browser.blocked[0])
         if wait_selector and steps:
             browser.wait_selector(wait_selector)
 

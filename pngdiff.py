@@ -17,6 +17,8 @@ import zlib
 from pathlib import Path
 
 PNG_SIG = b"\x89PNG\r\n\x1a\n"
+MAX_DIMENSION = 8192   # a 8192x8192 RGBA image is already 256 MB
+
 CHANNELS = {2: 3, 6: 4}
 SUPPORTED = "8-bit RGB/RGBA, non-interlaced"
 BLOCK = 8            # grid cell used to group changed pixels into regions
@@ -71,6 +73,11 @@ def decode(path: str | Path) -> tuple[int, int, int, bytes]:
         raise PngError("no IDAT chunk")
     if not seen_end:
         raise PngError("no IEND chunk (incomplete file)")
+
+    if width > MAX_DIMENSION or height > MAX_DIMENSION:
+        raise PngError(f"image is {width}x{height}; the limit is {MAX_DIMENSION} on a side")
+    if width == 0 or height == 0:
+        raise PngError("image declares a zero side")
 
     channels = CHANNELS[colour]
     stride = width * channels

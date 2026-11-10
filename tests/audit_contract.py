@@ -14,6 +14,8 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
+from localserve import PAGES
+
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -41,7 +43,7 @@ def page(cta_top: int = 240, nav: str = "#eef2f0", dot: str = "#eef2f0") -> str:
            "#price{position:absolute;left:30px;top:150px}")
     body = ("<div id='nav'><div id='dot'></div></div><div id='price'>Rp 120.000</div>"
             "<button id='cta'>PAY</button>")
-    return ("data:text/html,<style>" + css + "</style>" + body).replace("#", "%23")
+    return PAGES.add("<style>" + css + "</style>" + body)
 
 
 BASE = page()

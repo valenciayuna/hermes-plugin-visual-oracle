@@ -17,6 +17,8 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
+from localserve import PAGES
+
 
 PLUGIN = Path("/root/hackathon/hermes-plugin-visual-oracle")
 HERMES = Path("/usr/local/lib/hermes-agent")
@@ -99,11 +101,13 @@ def main() -> int:
     # leave a failing check in the store the plugin will read
     seed = f'''
 import importlib.util, json, os, sys
+sys.path.insert(0, "{PLUGIN}/tests")
+from localserve import PAGES
 spec = importlib.util.spec_from_file_location("vo", "{PLUGIN}/__init__.py")
 vo = importlib.util.module_from_spec(spec); sys.modules["vo"] = vo; spec.loader.exec_module(vo)
 css = "body{{margin:0;background:#fff}}#a{{position:absolute;top:%dpx;left:10px;width:120px;height:60px;background:#2f7d4f}}"
-page = ("data:text/html,<style>" + (css % 10) + "</style><div id='a'></div>").replace("#", "%23")
-moved = ("data:text/html,<style>" + (css % 200) + "</style><div id='a'></div>").replace("#", "%23")
+page = PAGES.add("<style>" + (css % 10) + "</style><div id='a'></div>")
+moved = PAGES.add("<style>" + (css % 200) + "</style><div id='a'></div>")
 vo.visual_base("itest-case", url=page, width=600, height=400, wait_ms=100)
 out = vo.visual_check("itest-case", url=moved)
 print(json.dumps({{"status": out.get("status"), "pct": out.get("changed_pct")}}))

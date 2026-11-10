@@ -245,3 +245,35 @@ tests/        deterministic decoder tests + real-Chrome end-to-end tests
 docs/         configuration reference, example report and images
 demo/         fixture pages and the recorded demo
 ```
+
+## What it will and will not render
+
+Only `http` and `https` are rendered. Everything else is refused before Chrome is asked:
+
+- `file://` and `data:` URLs, which would turn a screenshot into a way to read the host
+- `localhost`, `127.0.0.1` and `::1` are allowed, because that is where a dev server lives
+- private ranges (10/8, 172.16/12, 192.168/16, fc00::/7), link local (169.254/16, which includes the
+  `169.254.169.254` metadata address), loopback outside the allow list, and names like
+  `*.local`, `*.internal`, `metadata.google.internal`
+
+The check runs on the URL you pass, and on **every request the page makes**, redirects included, via
+CDP `Fetch` interception: a request to a refused host is failed before it leaves the browser, and the
+capture errors out naming the URL. A redirect to a blocked host therefore cannot produce a screenshot
+of it.
+
+To allow another host, list it explicitly:
+
+```bash
+export VO_ALLOW_HOSTS="staging.internal,10.0.0.12"   # comma separated, exact host names
+```
+
+Chrome runs with its sandbox unless the sandbox cannot work: as root, or inside a container without
+user namespaces, `--no-sandbox` is added, and `VO_NO_SANDBOX=1` forces it. That flag is a real
+downgrade, so it is not the default.
+
+## Input limits
+
+`image=` must be a PNG (the signature is checked, not the extension). A PNG whose header claims more
+than 8192 pixels on a side is refused before any decompression, so a tiny file cannot ask for
+gigabytes of memory. A `contract` may be an object, or a path to a JSON file **inside the plugin data
+folder**; a path elsewhere is refused rather than read.

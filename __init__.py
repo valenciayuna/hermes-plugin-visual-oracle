@@ -88,19 +88,48 @@ def _write_meta(case: Path, meta: dict) -> None:
 
 # --------------------------------------------------------------------------- contract helpers
 
-def _contract_from(value) -> dict:
-    """Accept a dict, or a JSON/YAML-free path to a .json file."""
+def _contract_from(value, case: Path | None = None) -> dict:
+    """Accept a dict, or a path to a .json file inside the plugin data folder.
+
+    The schema says object, and a free path would let a model read any JSON file on the host.
+    """
     if not value:
         return {}
     if isinstance(value, dict):
         return value
-    path = Path(os.path.expanduser(str(value)))
+    path = Path(os.path.expanduser(str(value))).resolve()
+    if case is not None:
+        root = case.resolve()
+        try:
+            path.relative_to(root)
+        except ValueError:
+            raise ValueError(
+                f"contract path must live under the plugin data folder ({root})") from None
     if not path.is_file():
         raise ValueError(f"contract file not found: {path}")
     try:
         return json.loads(path.read_text())
     except ValueError as exc:
         raise ValueError(f"contract is not valid JSON: {exc}") from None
+
+
+def allow_hosts() -> tuple[str, ...]:
+    """Hosts the operator allows even though they are not public.
+
+    Default is the local dev servers, so `url=http://localhost:3000` keeps working. Anything else
+    has to be listed in VO_ALLOW_HOSTS (comma separated).
+    """
+    raw = os.environ.get("VO_ALLOW_HOSTS", "").strip()
+    extra = tuple(h.strip().lower() for h in raw.split(",") if h.strip())
+    return ("localhost", "127.0.0.1", "::1") + extra
+
+
+def _looks_like_png(path: Path) -> bool:
+    try:
+        with path.open("rb") as handle:
+            return handle.read(8) == b"\x89PNG\r\n\x1a\n"
+    except OSError:
+        return False
 
 
 def _overlaps(a: list[int], b: list[int]) -> bool:
@@ -139,6 +168,8 @@ def visual_base(name: str, url: str = "", image: str = "", width: int = 1280,
             src = Path(os.path.expanduser(image))
             if not src.is_file():
                 raise CdpError(f"image not found: {src}")
+            if not _looks_like_png(src):
+                raise CdpError(f"not a PNG file: {src}")
             if dest.exists():
                 dest.unlink()
             shutil.copyfile(src, dest)
@@ -148,6 +179,7 @@ def visual_base(name: str, url: str = "", image: str = "", width: int = 1280,
                 raise CdpError("need either url=... or image=...")
             info = capture(url, dest, width=width, height=height, wait_ms=wait_ms,
                            wait_selector=wait_selector, stable=stable, masks=mask,
+                           allow_hosts=allow_hosts(),
                            require_images=require_images, steps=steps)
             info["source"] = "chrome"
     except (CdpError, OSError, ValueError) as exc:
@@ -177,7 +209,7 @@ def visual_check(name: str, url: str = "", image: str = "", threshold: float = D
     artifacts_dir = case / "last"
 
     try:
-        policy = _contract_from(contract)
+        policy = _contract_from(contract, case)
         # resolve every selector the contract names, so a missing one is an error not a pass
         probes: list[str] = []
         for item in policy.get("expected_changes", []) or []:
@@ -192,6 +224,8 @@ def visual_check(name: str, url: str = "", image: str = "", threshold: float = D
             src = Path(os.path.expanduser(image))
             if not src.is_file():
                 raise CdpError(f"image not found: {src}")
+            if not _looks_like_png(src):
+                raise CdpError(f"not a PNG file: {src}")
             coords, selectors = split_masks(mask)
             if selectors:
                 raise CdpError(
@@ -205,11 +239,12 @@ def visual_check(name: str, url: str = "", image: str = "", threshold: float = D
                 raise CdpError("need either url=... or image=...")
             capture_info = capture(url, current, width=width, height=height, wait_ms=wait_ms,
                                    wait_selector=wait_selector, stable=stable, masks=mask,
-                                   steps=steps)
+                                   steps=steps, allow_hosts=allow_hosts())
             capture_info["source"] = "chrome"
             probe_rects = {}
             if probes:
-                with Browser(width=width, height=height) as browser:
+                with Browser(width=width, height=height, allow_hosts=allow_hosts()) as browser:
+                    browser.guard_urls()
                     browser.navigate(url, wait_ms=wait_ms)
                     browser.wait_fonts()
                     if steps:

@@ -12,6 +12,8 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from localserve import PAGES
+
 
 HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(HERE.parent))
@@ -38,9 +40,10 @@ SHELL = ("body{margin:0;background:#fff;font:20px sans-serif}"
 
 
 def page(top: int, nav_colour: str = "#eef2f0", note: str = "checkout") -> str:
-    return ("data:text/html," + "<style>" + (SHELL % top).replace("#eef2f0", nav_colour, 1)
+    html = ("<style>" + (SHELL % top).replace("#eef2f0", nav_colour, 1)
             + "</style><div id='nav'></div><button id='cta'>BUY</button>"
-            + f"<div id='note'>{note}</div>").replace("#", "%23")
+            + f"<div id='note'>{note}</div>")
+    return PAGES.add(html)
 
 
 BASE = page(120)
