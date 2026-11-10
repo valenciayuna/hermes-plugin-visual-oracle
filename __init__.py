@@ -32,7 +32,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 import pngdiff  # noqa: E402
-from capture import capture, split_masks  # noqa: E402
+from capture import apply_steps, capture, split_masks  # noqa: E402
 from cdp import Browser, CdpError  # noqa: E402
 
 DEFAULT_THRESHOLD = 0.2
@@ -130,7 +130,7 @@ def _inside(inner: list[int], outer: list[int]) -> bool:
 def visual_base(name: str, url: str = "", image: str = "", width: int = 1280,
                 height: int = 720, wait_ms: int = 250, wait_selector: str = "",
                 stable: bool = True, mask: list | None = None,
-                require_images: bool = False) -> dict:
+                require_images: bool = False, steps: list | None = None) -> dict:
     """Capture (or accept) a screenshot and store it as the baseline for `name`."""
     case = _case_dir(name)
     dest = case / "baseline.png"
@@ -148,7 +148,7 @@ def visual_base(name: str, url: str = "", image: str = "", width: int = 1280,
                 raise CdpError("need either url=... or image=...")
             info = capture(url, dest, width=width, height=height, wait_ms=wait_ms,
                            wait_selector=wait_selector, stable=stable, masks=mask,
-                           require_images=require_images)
+                           require_images=require_images, steps=steps)
             info["source"] = "chrome"
     except (CdpError, OSError, ValueError) as exc:
         return {"ok": False, "error": str(exc)}
@@ -162,7 +162,7 @@ def visual_base(name: str, url: str = "", image: str = "", width: int = 1280,
 def visual_check(name: str, url: str = "", image: str = "", threshold: float = DEFAULT_THRESHOLD,
                  mask: list | None = None, contract=None, width: int = 0, height: int = 0,
                  wait_ms: int = 250, wait_selector: str = "", stable: bool = True,
-                 on_exceed: str = "fail") -> dict:
+                 on_exceed: str = "fail", steps: list | None = None) -> dict:
     """Render now, diff against the baseline, and decide PASS / FAIL / REVIEW."""
     case = _case_dir(name)
     base = case / "baseline.png"
@@ -204,13 +204,16 @@ def visual_check(name: str, url: str = "", image: str = "", threshold: float = D
             if not url:
                 raise CdpError("need either url=... or image=...")
             capture_info = capture(url, current, width=width, height=height, wait_ms=wait_ms,
-                                   wait_selector=wait_selector, stable=stable, masks=mask)
+                                   wait_selector=wait_selector, stable=stable, masks=mask,
+                                   steps=steps)
             capture_info["source"] = "chrome"
             probe_rects = {}
             if probes:
                 with Browser(width=width, height=height) as browser:
                     browser.navigate(url, wait_ms=wait_ms)
                     browser.wait_fonts()
+                    if steps:
+                        apply_steps(browser, steps)
                     for selector in probes:
                         probe_rects[selector] = browser.rects(selector)
 
@@ -424,6 +427,11 @@ _BASE_SCHEMA = {
             "mask": {"type": "array", "description": "Regions [x,y,w,h] or CSS selectors to ignore.",
                      "items": {}},
             "require_images": {"type": "boolean", "description": "Fail if any <img> is broken."},
+            "steps": {"type": "array", "description":
+                      "Deterministic actions before the screenshot: "
+                      '[{"click": "#menu-btn"}, {"wait_selector": "nav.open"}, {"settle_ms": 200}]',
+                      "items": {"type": "object"}},
+
         },
         "required": ["name"],
     },
@@ -452,6 +460,10 @@ _CHECK_SCHEMA = {
             "width": {"type": "integer", "description": "Override viewport width."},
             "height": {"type": "integer", "description": "Override viewport height."},
             "wait_selector": {"type": "string", "description": "Block until this selector exists."},
+            "steps": {"type": "array", "description":
+                      "Deterministic actions before the screenshot: "
+                      '[{"click": "#menu-btn"}, {"wait_selector": "nav.open"}, {"settle_ms": 200}]',
+                      "items": {"type": "object"}},
         },
         "required": ["name"],
     },
@@ -469,13 +481,14 @@ def _base_handler(args: dict, **_) -> str:
                       str(args.get("image") or ""), int(args.get("width") or 1280),
                       int(args.get("height") or 720), int(args.get("wait_ms") or 250),
                       str(args.get("wait_selector") or ""), bool(args.get("stable", True)),
-                      args.get("mask"), bool(args.get("require_images", False)))
+                      args.get("mask"), bool(args.get("require_images", False)), args.get("steps"))
     if not out.get("ok"):
         return f"visual_base failed: {out.get('error')}"
     cap = out.get("capture") or {}
     return (f"baseline '{out['name']}' stored ({out['bytes']} bytes)\n"
             f"viewport {cap.get('viewport')} · chrome {cap.get('chrome', '?')} · "
-            f"fonts {cap.get('fonts', '?')} · stable after {cap.get('stable_tries', 1)} capture(s)")
+            f"fonts {cap.get('fonts', '?')} · stable after {cap.get('stable_tries', 1)} capture(s)"
+            + (f"\nsteps: {' then '.join(cap.get('steps') or [])}" if cap.get("steps") else ""))
 
 
 def _check_handler(args: dict, **_) -> str:
@@ -485,7 +498,7 @@ def _check_handler(args: dict, **_) -> str:
                        args.get("mask"), args.get("contract"), int(args.get("width") or 0),
                        int(args.get("height") or 0), int(args.get("wait_ms") or 250),
                        str(args.get("wait_selector") or ""), bool(args.get("stable", True)),
-                       str(args.get("on_exceed") or "fail"))
+                       str(args.get("on_exceed") or "fail"), args.get("steps"))
     if not out.get("ok"):
         return f"visual_check failed: {out.get('error')}"
     lines = [f"{out['status']} {out['name']}: {out['changed_pct']}% changed "

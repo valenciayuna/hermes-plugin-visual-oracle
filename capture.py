@@ -77,9 +77,43 @@ def split_masks(masks: list | None) -> tuple[list[list[int]], list[str]]:
     return coords, selectors
 
 
+def apply_steps(browser: Browser, steps: list | None, settle_ms: int = 120) -> list[str]:
+    """Run a short, deterministic script before the screenshot: click, wait, scroll, settle.
+
+    This is how a state that only exists after a tap gets a baseline. No framework, no retries
+    with sleeps: each step either succeeds or raises with the selector that failed.
+    """
+    applied: list[str] = []
+    for index, step in enumerate(steps or []):
+        if not isinstance(step, dict):
+            raise CdpError(f"step {index} must be an object with click/wait_selector/scroll/settle_ms")
+        if "click" in step:
+            selector = str(step["click"])
+            clicked = browser.evaluate(
+                "(function(sel){const el=document.querySelector(sel);"
+                "if(!el) return 'missing'; el.click(); return 'ok';})(" + json.dumps(selector) + ")")
+            if clicked != "ok":
+                raise CdpError(f"step {index}: nothing to click for {selector!r}")
+            applied.append(f"click {selector}")
+        if "wait_selector" in step:
+            selector = str(step["wait_selector"])
+            browser.wait_selector(selector)
+            applied.append(f"wait {selector}")
+        if "scroll" in step:
+            y = int(step["scroll"])
+            browser.evaluate(f"window.scrollTo(0, {y}); true")
+            applied.append(f"scroll {y}")
+        if "settle_ms" in step:
+            time.sleep(max(0, int(step["settle_ms"])) / 1000.0)
+            applied.append(f"settle {int(step['settle_ms'])}ms")
+    if settle_ms:
+        time.sleep(settle_ms / 1000.0)
+    return applied
+
+
 def capture(url: str, out: Path, width: int = 1280, height: int = 720, wait_ms: int = 250,
             wait_selector: str = "", stable: bool = True, masks: list | None = None,
-            require_images: bool = False, attempts: int = 4) -> dict:
+            require_images: bool = False, attempts: int = 4, steps: list | None = None) -> dict:
     """Render `url` and write a PNG. Returns capture metadata; raises CdpError on any doubt."""
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -90,6 +124,10 @@ def capture(url: str, out: Path, width: int = 1280, height: int = 720, wait_ms: 
         fonts = browser.wait_fonts()
 
         if wait_selector:
+            browser.wait_selector(wait_selector)
+
+        applied = apply_steps(browser, steps)
+        if wait_selector and steps:
             browser.wait_selector(wait_selector)
 
         rects, mask_report = resolve_masks(browser, masks, width, height)
@@ -125,5 +163,6 @@ def capture(url: str, out: Path, width: int = 1280, height: int = 720, wait_ms: 
             "masks": mask_report,
             "mask_rects": rects,
             "broken_images": broken,
+            "steps": applied,
         }
     return info

@@ -143,6 +143,26 @@ Deterministic rules:
 `#price` is the right move. It knows the pixels inside `#cta` moved and nothing else did. The
 judgement beyond that stays with a human, on purpose.
 
+## States that only exist after a tap
+
+A page can match pixel for pixel while the bug hides behind a click. Pass a short deterministic
+script and the baseline captures that state instead of the landing screen:
+
+```python
+visual_base("menu-open", url="http://localhost:3000/", steps=[
+    {"click": "#menu-btn"},
+    {"wait_selector": "nav.menu.is-open"},
+    {"settle_ms": 180},
+])
+```
+
+Supported steps: `click` (CSS selector), `wait_selector`, `scroll` (pixels), `settle_ms`. A click on a
+missing element and a wait that times out are both errors, never silent skips. The applied steps are
+recorded in the capture metadata, so a baseline always says how that state was reached.
+
+Without this, the same page reports 0.0% changed and passes while the opened menu covers the pay
+button. `tests/audit_steps.py` reproduces exactly that case.
+
 ## Masks
 
 ```python
@@ -177,6 +197,7 @@ python3 tests/visual_proof.py        16/16   end to end through Chrome
 python3 tests/audit_contract.py      12/12   contract and mask matrix
 python3 tests/audit_resilience.py     5/5    hook under broken stores
 python3 tests/audit_integration.py    9/9    Hermes dispatcher, call site, nudge budget
+python3 tests/audit_steps.py          9/9    state capture: menu closed vs open
 hermes plugins validate .            passed
 ```
 

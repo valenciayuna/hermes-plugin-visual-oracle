@@ -19,6 +19,7 @@ a check that cannot run honestly must not report a pass.
 | `stable` | bool | `true` | require two consecutive identical frames |
 | `mask` | list | `[]` | `[x,y,w,h]` or CSS selectors; see Masks |
 | `require_images` | bool | `false` | if true, any broken `<img>` is an error |
+| `steps` | list | `[]` | actions before the screenshot: `{"click": sel}`, `{"wait_selector": sel}`, `{"scroll": px}`, `{"settle_ms": ms}` |
 
 Baseline files: `$HERMES_HOME/plugin-data/visual-oracle/<session>/<case>/baseline.png`
 plus `meta.json` holding the capture metadata (Chrome version, viewport, fonts, tries, masks).
@@ -38,6 +39,7 @@ plus `meta.json` holding the capture metadata (Chrome version, viewport, fonts, 
 | `on_exceed` | `"fail"` \| `"review"` | `"fail"` | verdict when over threshold and no contract |
 | `width` / `height` | int | baseline's | override the viewport (usually leave empty) |
 | `wait_ms`, `wait_selector`, `stable` | as above | | applying to the current render |
+| `steps` | list | `[]` | same deterministic script, run before the render is captured |
 
 Output:
 
@@ -128,5 +130,7 @@ Written with every baseline and echoed by `visual_base`:
 | unsupported / corrupted PNG | `PngError` naming the reason |
 | baseline missing on check | error telling you to call `visual_base` |
 | contract selector missing | `REVIEW`, never `PASS` |
+| `steps` click on a missing element | error naming the selector |
+| `steps` wait that times out | error naming the selector |
 
 Nothing in this list degrades into a pass.
